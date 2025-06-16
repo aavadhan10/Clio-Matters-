@@ -66,13 +66,13 @@ st.markdown("Ask questions about your Clio matters, clients, tasks, and more. Th
 # User input
 user_question = st.text_area(
     "Ask your legal assistant:",
-    placeholder="""Examples:
-• What matters need urgent attention?
-• Which clients have overdue tasks?
-• Summarize all active personal injury cases
-• What should I prioritize today?
-• Show me matters opened this month
-• Which attorneys are handling the most cases?""",
+    placeholder="""Try specific questions like:
+• How many matters do I have in Clio?
+• What are my recent matters?
+• Show me matters created this month
+• What tasks are due today?
+• List all my clients
+• What's the status of my open cases?""",
     height=120
 )
 
@@ -91,14 +91,20 @@ if ask_button:
                 st.success("✅ Response:")
                 
                 # Display the response
-                if "output" in airia_response:
+                if "result" in airia_response and airia_response["result"]:
+                    result = airia_response["result"]
+                    if result and result.lower() != user_question.lower():  # Don't show if it's just echoing
+                        st.markdown(result)
+                    else:
+                        st.warning("⚠️ The agent returned an echo response. This might indicate:")
+                        st.write("• The Airia agent needs more configuration")
+                        st.write("• The agent doesn't have proper Clio connection")
+                        st.write("• Try asking a more specific legal question")
+                elif "output" in airia_response and airia_response["output"]:
                     st.markdown(airia_response["output"])
-                elif "result" in airia_response:
-                    st.markdown(airia_response["result"])
-                elif isinstance(airia_response, str):
-                    st.markdown(airia_response)
                 else:
-                    st.write(airia_response)
+                    st.warning("⚠️ Received empty or unclear response from agent")
+                    st.write("Raw response:", airia_response)
                 
                 # Optional: Show raw response
                 with st.expander("🔍 View Raw Response"):
