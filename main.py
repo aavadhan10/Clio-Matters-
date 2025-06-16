@@ -1,9 +1,9 @@
 import streamlit as st
 import requests
 from datetime import datetime
-import anthropic
+import json
 
-# === CONFIGURATION WITH ERROR HANDLING ===
+# === CONFIGURATION ===
 def get_secrets():
     """Get secrets with proper error handling"""
     try:
@@ -11,22 +11,27 @@ def get_secrets():
         clio_client_secret = st.secrets["clio"]["client_secret"]
         clio_refresh_token = st.secrets["clio"]["refresh_token"]
         claude_api_key = st.secrets["claude"]["api_key"]
-        return clio_client_id, clio_client_secret, clio_refresh_token, claude_api_key
+        airia_api_key = st.secrets["airia"]["api_key"]
+        airia_user_id = st.secrets["airia"]["user_id"]
+        return clio_client_id, clio_client_secret, clio_refresh_token, claude_api_key, airia_api_key, airia_user_id
     except KeyError as e:
         st.error(f"Missing secret: {e}")
-        st.info("Please configure your secrets in Streamlit. See the setup instructions below.")
-        return None, None, None, None
+        return None, None, None, None, None, None
 
-TOKEN_URL = "https://app.clio.com/oauth/token"
-MATTERS_URL = "https://app.clio.com/api/v4/matters"
+# Airia Configuration
+AIRIA_API_URL = "https://api.airia.ai/v2/PipelineExecution/28330c27-c35a-4d5f-9797-e59382f5d140"
 
-# === GET ACCESS TOKEN ===
+# Clio Configuration
+CLIO_TOKEN_URL = "https://app.clio.com/oauth/token"
+CLIO_MATTERS_URL = "https://app.clio.com/api/v4/matters"
+
+# === CLIO FUNCTIONS ===
 @st.cache_data(ttl=3600)
-def refresh_access_token(client_id, client_secret, refresh_token):
+def refresh_clio_access_token(client_id, client_secret, refresh_token):
     """Refresh Clio access token"""
     try:
         response = requests.post(
-            TOKEN_URL,
+            CLIO_TOKEN_URL,
             data={
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
@@ -38,152 +43,179 @@ def refresh_access_token(client_id, client_secret, refresh_token):
         response.raise_for_status()
         return response.json().get("access_token")
     except requests.exceptions.RequestException as e:
-        st.error(f"Failed to refresh access token: {e}")
+        st.error(f"Failed to refresh Clio access token: {e}")
         return None
 
-# === FETCH CLIO MATTERS ===
-def fetch_matters(access_token, per_page=100):
+def fetch_clio_matters(access_token, per_page=100):
     """Fetch matters from Clio API"""
     try:
         response = requests.get(
-            f"{MATTERS_URL}?per_page={per_page}",
+            f"{CLIO_MATTERS_URL}?per_page={per_page}",
             headers={"Authorization": f"Bearer {access_token}"}
         )
-        
-        # Debug: Show response status
-        st.info(f"Clio API Response Status: {response.status_code}")
-        
         response.raise_for_status()
-        data = response.json()
-        
-        # Debug: Show raw response structure
-        st.info(f"Response keys: {list(data.keys())}")
-        matters = data.get("data", [])
-        
-        # Debug: Show matter count and sample
-        st.info(f"Found {len(matters)} matters")
-        if matters:
-            st.info(f"Sample matter keys: {list(matters[0].keys())}")
-        
-        return matters
+        return response.json().get("data", [])
     except requests.exceptions.RequestException as e:
-        st.error(f"Failed to fetch matters: {e}")
+        st.error(f"Failed to fetch Clio matters: {e}")
         return []
 
-# === SUMMARIZE WITH CLAUDE ===
-def summarize_matters_with_claude(matters, prompt, claude_api_key):
-    """Summarize matters using Claude API"""
-    if not matters:
-        return "No matter data available to summarize."
-    
-    # Prepare context
-    context_lines = []
-    for m in matters:
-        name = m.get("display_number", "N/A")
-        status = m.get("status", "unknown")
-        client = m.get("client", {}).get("name", "No client") if m.get("client") else "No client"
-        attorney = m.get("responsible_attorney", {}).get("name", "Unassigned") if m.get("responsible_attorney") else "Unassigned"
-        opened = m.get("open_date", "Unknown")
-        context_lines.append(f"{name} — {status} — {client} — {attorney} — opened on {opened}")
-    
-    context = "\n".join(context_lines)
-    
+# === AIRIA FUNCTIONS ===
+def call_airia_agent(user_input, airia_api_key, airia_user_id, clio_data=None):
+    """Call the Airia Clio Agent"""
     try:
-        client = anthropic.Anthropic(api_key=claude_api_key)
-        message = client.messages.create(
-            model="claude-3-sonnet-20240229",
-            max_tokens=800,
-            temperature=0.7,
-            system="You are a helpful legal assistant summarizing Clio matter data.",
-            messages=[
-                {"role": "user", "content": f"Prompt: {prompt}\n\nMatter data:\n{context}"}
-            ]
+        # Prepare the data for Airia
+        prompt = user_input
+        if clio_data:
+            # Include Clio matter data as context
+            context_lines = []
+            for matter in clio_data:
+                name = matter.get("display_number", "N/A")
+                status = matter.get("status", "unknown")
+                client = matter.get("client", {}).get("name", "No client") if matter.get("client") else "No client"
+                attorney = matter.get("responsible_attorney", {}).get("name", "Unassigned") if matter.get("responsible_attorney") else "Unassigned"
+                opened = matter.get("open_date", "Unknown")
+                context_lines.append(f"{name} — {status} — {client} — {attorney} — opened on {opened}")
+            
+            clio_context = "\n".join(context_lines)
+            prompt = f"User Question: {user_input}\n\nClio Matter Data:\n{clio_context}"
+        
+        # Call Airia API
+        response = requests.post(
+            AIRIA_API_URL,
+            headers={
+                "X-API-KEY": airia_api_key,
+                "Content-Type": "application/json"
+            },
+            json={
+                "userID": airia_user_id,
+                "userInput": prompt,
+                "asyncOutput": False
+            }
         )
-        return message.content[0].text.strip()
-    except Exception as e:
-        st.error(f"Failed to get Claude response: {e}")
-        return "Error generating summary with Claude."
+        
+        response.raise_for_status()
+        return response.json()
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to call Airia agent: {e}")
+        return None
 
 # === STREAMLIT UI ===
-st.set_page_config(page_title="Clio + Claude Matter Assistant", layout="centered")
-st.title("🤖 Clio Matter Agent (Claude-powered)")
+st.set_page_config(page_title="Clio + Airia Legal Assistant", layout="wide")
+st.title("⚖️ Clio + Airia Legal Assistant")
 
 # Get secrets
-clio_client_id, clio_client_secret, clio_refresh_token, claude_api_key = get_secrets()
+clio_client_id, clio_client_secret, clio_refresh_token, claude_api_key, airia_api_key, airia_user_id = get_secrets()
 
-# Only proceed if we have all secrets
-if all([clio_client_id, clio_client_secret, clio_refresh_token, claude_api_key]):
-    # Get access token
-    access_token = refresh_access_token(clio_client_id, clio_client_secret, clio_refresh_token)
+# Check if we have all required secrets
+if not all([clio_client_id, clio_client_secret, clio_refresh_token, airia_api_key, airia_user_id]):
+    st.error("Missing required secrets. Please configure:")
+    st.code("""
+[clio]
+client_id = "your_clio_client_id"
+client_secret = "your_clio_client_secret"
+refresh_token = "your_clio_refresh_token"
+
+[claude]
+api_key = "your_claude_api_key"
+
+[airia]
+api_key = "your_airia_api_key"
+user_id = "your_airia_user_id"
+    """)
+    st.stop()
+
+# Sidebar for options
+with st.sidebar:
+    st.header("🔧 Options")
+    include_clio_data = st.checkbox("Include Clio matter data", value=True)
+    show_raw_response = st.checkbox("Show raw Airia response", value=False)
+
+# Main interface
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    st.header("📋 Clio Matters")
     
-    if access_token:
-        # Fetch matters
-        matters = fetch_matters(access_token)
-        
-        if matters:
-            st.success(f"✅ Connected to Clio! Found {len(matters)} matters.")
-            
-            # Add expandable section to show matter details
-            with st.expander("🔍 View Matter Details"):
-                for i, matter in enumerate(matters[:5]):  # Show first 5 matters
-                    st.write(f"**Matter {i+1}:**")
-                    st.json(matter)
-            
-            st.subheader("📝 Ask your Clio Agent:")
-            prompt = st.text_input(
-                "Enter a natural language question:", 
-                placeholder="e.g. What matters are open and who is working on them?"
-            )
-            
-            if st.button("Submit"):
-                if not prompt:
-                    st.warning("Please enter a prompt.")
-                else:
-                    with st.spinner("Thinking with Claude..."):
-                        summary = summarize_matters_with_claude(matters, prompt, claude_api_key)
-                        st.markdown("### 🧠 Summary:")
-                        st.markdown(summary)
+    # Try to get Clio data
+    clio_matters = []
+    if include_clio_data:
+        access_token = refresh_clio_access_token(clio_client_id, clio_client_secret, clio_refresh_token)
+        if access_token:
+            clio_matters = fetch_clio_matters(access_token)
+            if clio_matters:
+                st.success(f"✅ Connected to Clio! Found {len(clio_matters)} matters.")
+                
+                # Show matter summary
+                with st.expander(f"📁 View {len(clio_matters)} Matters"):
+                    for i, matter in enumerate(clio_matters[:10]):  # Show first 10
+                        st.write(f"**{matter.get('display_number', 'N/A')}** - {matter.get('status', 'Unknown')} - {matter.get('client', {}).get('name', 'No client')}")
+            else:
+                st.warning("No matters found in Clio")
         else:
-            st.warning("⚠️ No matters found. This could mean:")
-            st.write("- Your Clio account has no matters")
-            st.write("- The API permissions don't include matter access")
-            st.write("- The refresh token needs to be regenerated")
-            st.write("- Check the debug info above for API response details")
+            st.error("Failed to connect to Clio")
+            include_clio_data = False
     else:
-        st.error("Failed to get access token. Check your Clio credentials.")
-else:
+        st.info("Clio integration disabled")
+
+with col2:
+    st.header("🤖 Airia Agent")
+    
+    # User input
+    user_question = st.text_area(
+        "Ask your legal assistant:",
+        placeholder="e.g., What matters need urgent attention? Which clients have overdue tasks?",
+        height=100
+    )
+    
+    # Submit button
+    if st.button("🚀 Ask Airia", type="primary"):
+        if user_question:
+            with st.spinner("Consulting Airia agent..."):
+                # Call Airia with or without Clio data
+                airia_response = call_airia_agent(
+                    user_question, 
+                    airia_api_key, 
+                    airia_user_id,
+                    clio_matters if include_clio_data else None
+                )
+                
+                if airia_response:
+                    st.success("✅ Response from Airia:")
+                    
+                    # Display the response
+                    if "output" in airia_response:
+                        st.markdown(airia_response["output"])
+                    elif "result" in airia_response:
+                        st.markdown(airia_response["result"])
+                    else:
+                        st.write(airia_response)
+                    
+                    # Show raw response if requested
+                    if show_raw_response:
+                        with st.expander("🔍 Raw Airia Response"):
+                            st.json(airia_response)
+                else:
+                    st.error("Failed to get response from Airia")
+        else:
+            st.warning("Please enter a question")
+
+# Footer with instructions
+st.markdown("---")
+with st.expander("ℹ️ How to use this app"):
     st.markdown("""
-    ## 🔧 Setup Instructions
+    **This app combines Clio legal matter data with Airia AI for intelligent legal assistance.**
     
-    To use this app, you need to configure secrets in Streamlit:
+    **Features:**
+    - 📊 Fetches your live Clio matter data
+    - 🤖 Sends questions to your custom Airia agent
+    - 🔄 Provides context-aware responses using both systems
     
-    ### 1. Create a `.streamlit/secrets.toml` file (local development):
-    ```toml
-    [clio]
-    client_id = "your_clio_client_id"
-    client_secret = "your_clio_client_secret"
-    refresh_token = "your_clio_refresh_token"
-    
-    [claude]
-    api_key = "your_claude_api_key"
-    ```
-    
-    ### 2. For Streamlit Cloud deployment:
-    - Go to your app settings
-    - Navigate to "Secrets"
-    - Add the same TOML format secrets
-    
-    ### 3. Getting Clio API credentials:
-    - Log into your Clio account
-    - Go to Settings > API Credentials
-    - Create a new application
-    - Use the authorization flow to get your refresh token
-    
-    ### 4. Getting Claude API key:
-    - Visit https://console.anthropic.com
-    - Create an account and get your API key
+    **Example questions:**
+    - "What matters are overdue and need immediate attention?"
+    - "Which clients have the most active cases?"
+    - "Summarize the status of all personal injury cases"
+    - "What tasks should I prioritize today?"
     """)
 
-# Optional: Add a debug section
-if st.checkbox("Debug: Show available secrets"):
-    st.write("Available secret keys:", list(st.secrets.keys()) if hasattr(st, 'secrets') else "No secrets available")
+st.markdown("*Powered by Clio API + Airia AI*")
