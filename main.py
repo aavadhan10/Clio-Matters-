@@ -1,49 +1,85 @@
+
 import streamlit as st
 import requests
+from datetime import datetime
+import openai
 
 # === CONFIGURATION ===
-API_URL = "https://api.airia.ai/v2/PipelineExecution/28330c27-c35a-4d5f-9797-e59382f5d140"
-API_KEY = "ak-MzQ0MDQ3Nzc4MnwxNzUwMTE1NTUxNzQ0fENhcmF2ZWwgTGF3LXwxfDI4NDEzNjAxMDQg"
+CLIO_CLIENT_ID = st.secrets["clio"]["client_id"]
+CLIO_CLIENT_SECRET = st.secrets["clio"]["client_secret"]
+CLIO_REFRESH_TOKEN = st.secrets["clio"]["refresh_token"]
+OPENAI_API_KEY = st.secrets["openai"]["api_key"]
 
-# Optional: set user_id manually if known, otherwise fetch once from successful response
-USER_ID = None  # or paste a known ID like "123e4567-e89b-12d3-a456-426614174000"
+TOKEN_URL = "https://app.clio.com/oauth/token"
+MATTERS_URL = "https://app.clio.com/api/v4/matters"
 
-st.set_page_config(page_title="Clio Matters Overview", layout="centered")
-st.title("🔍 Clio Matter Status Agent")
+# === GET ACCESS TOKEN ===
+@st.cache_data(ttl=3600)
+def refresh_access_token():
+    response = requests.post(
+        TOKEN_URL,
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": CLIO_REFRESH_TOKEN,
+            "client_id": CLIO_CLIENT_ID,
+            "client_secret": CLIO_CLIENT_SECRET
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    return response.json().get("access_token")
 
-query = st.text_input("Ask about your matters (e.g., 'What matters are open today?')")
+# === FETCH CLIO MATTERS ===
+def fetch_matters(access_token, per_page=100):
+    response = requests.get(
+        f"{MATTERS_URL}?per_page={per_page}",
+        headers={"Authorization": f"Bearer {access_token}"}
+    )
+    return response.json().get("data", [])
 
-if st.button("Run Agent"):
-    if not query:
-        st.warning("Please enter a question.")
+# === SUMMARIZE WITH OPENAI ===
+def summarize_matters_with_llm(matters, prompt):
+    openai.api_key = OPENAI_API_KEY
+    if not matters:
+        return "No matter data available to summarize."
+
+    context_lines = []
+    for m in matters:
+        name = m.get("display_number", "N/A")
+        status = m.get("status", "unknown")
+        client = m.get("client", {}).get("name", "No client")
+        attorney = m.get("responsible_attorney", {}).get("name", "Unassigned")
+        opened = m.get("open_date", "Unknown")
+        context_lines.append(f"{name} — {status} — {client} — {attorney} — opened on {opened}")
+
+    context = "\n".join(context_lines)
+
+    messages = [
+        {"role": "system", "content": "You are a helpful legal assistant summarizing Clio matter data."},
+        {"role": "user", "content": f"Prompt: {prompt}\n\nData:\n{context}"}
+    ]
+
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=messages
+    )
+    return response.choices[0].message.content.strip()
+
+# === STREAMLIT UI ===
+st.set_page_config(page_title="Clio Agent (Prompt + Summary)", layout="centered")
+st.title("🤖 Clio Matter Assistant")
+
+access_token = refresh_access_token()
+matters = fetch_matters(access_token)
+
+st.subheader("📝 Ask your Clio Agent:")
+prompt = st.text_input("Enter a natural language question:", placeholder="e.g. What matters are open and who is working on them?")
+
+if st.button("Submit"):
+    if not prompt:
+        st.warning("Please enter a prompt.")
     else:
-        headers = {
-            "X-API-KEY": API_KEY,
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "userInput": query,
-            "asyncOutput": False
-        }
-
-        # Include userId if known
-        if USER_ID:
-            payload["userId"] = USER_ID
-
-        try:
-            response = requests.post(API_URL, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
-
-            # On first run, extract and save userId if needed
-            if not USER_ID and "userId" in data:
-                USER_ID = data["userId"]
-                st.success(f"Retrieved and cached user ID: `{USER_ID}`")
-
-            st.subheader("🔎 Agent Response")
-            st.markdown(data.get("output", "No output found."))
-
-        except requests.exceptions.RequestException as e:
-            st.error(f"Error: {e}")
+        with st.spinner("Thinking..."):
+            summary = summarize_matters_with_llm(matters, prompt)
+            st.markdown("### 🧠 Summary:")
+            st.markdown(summary)
 
