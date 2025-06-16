@@ -19,7 +19,26 @@ AIRIA_API_URL = "https://api.airia.ai/v2/PipelineExecution/28330c27-c35a-4d5f-97
 def call_airia_agent(user_input, airia_api_key):
     """Call the Airia Clio Agent"""
     try:
-        # Call Airia API - the agent handles Clio integration internally
+        # Extract user ID from the API key if possible
+        # Your API key format: ak-MzQ0MDQ3Nzc4MnwxNzUwMTE1NTUxNzQ0fENhcmF2ZWwgTGF3LXwxfDI4NDEzNjAxMDQg
+        # Try to extract user ID from the key
+        user_id = "default_user"  # Fallback
+        try:
+            import base64
+            # Decode the API key to extract user info
+            key_parts = airia_api_key.split('-', 2)
+            if len(key_parts) > 2:
+                encoded_part = key_parts[2]
+                # Try to decode and extract user ID
+                decoded = base64.b64decode(encoded_part + '==').decode('utf-8', errors='ignore')
+                if '|' in decoded:
+                    parts = decoded.split('|')
+                    if len(parts) > 0:
+                        user_id = parts[0]  # First part might be user ID
+        except:
+            user_id = "default_user"
+        
+        # Call Airia API
         response = requests.post(
             AIRIA_API_URL,
             headers={
@@ -27,11 +46,13 @@ def call_airia_agent(user_input, airia_api_key):
                 "Content-Type": "application/json"
             },
             json={
+                "userID": user_id,
                 "userInput": user_input,
                 "asyncOutput": False
             }
         )
         
+        st.info(f"Request sent with userID: {user_id}")
         response.raise_for_status()
         return response.json()
         
@@ -66,15 +87,27 @@ st.markdown("Ask questions about your Clio matters, clients, tasks, and more. Th
 # User input
 user_question = st.text_area(
     "Ask your legal assistant:",
-    placeholder="""Try specific questions like:
-• How many matters do I have in Clio?
-• What are my recent matters?
-• Show me matters created this month
-• What tasks are due today?
-• List all my clients
-• What's the status of my open cases?""",
+    placeholder="""Try these diagnostic questions:
+• Hello, can you hear me?
+• What is your purpose?
+• Do you have access to Clio?
+• Tell me about yourself
+• What can you help me with?""",
     height=120
 )
+
+# Quick test buttons
+st.markdown("**Quick Tests:**")
+col1, col2, col3 = st.columns(3)
+with col1:
+    if st.button("Test: Hello"):
+        user_question = "Hello, what can you help me with?"
+with col2:
+    if st.button("Test: Clio Access"):
+        user_question = "Do you have access to Clio data?"
+with col3:
+    if st.button("Test: Purpose"):
+        user_question = "What is your purpose and what can you do?"
 
 # Submit button
 col1, col2, col3 = st.columns([1, 2, 1])
