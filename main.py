@@ -1,14 +1,13 @@
-
 import streamlit as st
 import requests
 from datetime import datetime
-import openai
+import anthropic
 
 # === CONFIGURATION ===
 CLIO_CLIENT_ID = st.secrets["clio"]["client_id"]
 CLIO_CLIENT_SECRET = st.secrets["clio"]["client_secret"]
 CLIO_REFRESH_TOKEN = st.secrets["clio"]["refresh_token"]
-OPENAI_API_KEY = st.secrets["openai"]["api_key"]
+CLAUDE_API_KEY = st.secrets["claude"]["api_key"]
 
 TOKEN_URL = "https://app.clio.com/oauth/token"
 MATTERS_URL = "https://app.clio.com/api/v4/matters"
@@ -36,9 +35,8 @@ def fetch_matters(access_token, per_page=100):
     )
     return response.json().get("data", [])
 
-# === SUMMARIZE WITH OPENAI ===
-def summarize_matters_with_llm(matters, prompt):
-    openai.api_key = OPENAI_API_KEY
+# === SUMMARIZE WITH CLAUDE ===
+def summarize_matters_with_claude(matters, prompt):
     if not matters:
         return "No matter data available to summarize."
 
@@ -53,20 +51,21 @@ def summarize_matters_with_llm(matters, prompt):
 
     context = "\n".join(context_lines)
 
-    messages = [
-        {"role": "system", "content": "You are a helpful legal assistant summarizing Clio matter data."},
-        {"role": "user", "content": f"Prompt: {prompt}\n\nData:\n{context}"}
-    ]
-
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=messages
+    client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+    message = client.messages.create(
+        model="claude-3-sonnet-20240229",
+        max_tokens=800,
+        temperature=0.7,
+        system="You are a helpful legal assistant summarizing Clio matter data.",
+        messages=[
+            {"role": "user", "content": f"Prompt: {prompt}\n\nMatter data:\n{context}"}
+        ]
     )
-    return response.choices[0].message.content.strip()
+    return message.content[0].text.strip()
 
 # === STREAMLIT UI ===
-st.set_page_config(page_title="Clio Agent (Prompt + Summary)", layout="centered")
-st.title("🤖 Clio Matter Assistant")
+st.set_page_config(page_title="Clio + Claude Matter Assistant", layout="centered")
+st.title("🤖 Clio Matter Agent (Claude-powered)")
 
 access_token = refresh_access_token()
 matters = fetch_matters(access_token)
@@ -78,8 +77,7 @@ if st.button("Submit"):
     if not prompt:
         st.warning("Please enter a prompt.")
     else:
-        with st.spinner("Thinking..."):
-            summary = summarize_matters_with_llm(matters, prompt)
+        with st.spinner("Thinking with Claude..."):
+            summary = summarize_matters_with_claude(matters, prompt)
             st.markdown("### 🧠 Summary:")
             st.markdown(summary)
-
