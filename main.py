@@ -12,7 +12,8 @@ def get_secrets():
         clio_refresh_token = st.secrets["clio"]["refresh_token"]
         claude_api_key = st.secrets["claude"]["api_key"]
         airia_api_key = st.secrets["airia"]["api_key"]
-        airia_user_id = st.secrets["airia"]["user_id"]
+        # User ID is optional - can be extracted from API key or provided separately
+        airia_user_id = st.secrets["airia"].get("user_id", None)
         return clio_client_id, clio_client_secret, clio_refresh_token, claude_api_key, airia_api_key, airia_user_id
     except KeyError as e:
         st.error(f"Missing secret: {e}")
@@ -60,7 +61,7 @@ def fetch_clio_matters(access_token, per_page=100):
         return []
 
 # === AIRIA FUNCTIONS ===
-def call_airia_agent(user_input, airia_api_key, airia_user_id, clio_data=None):
+def call_airia_agent(user_input, airia_api_key, airia_user_id=None, clio_data=None):
     """Call the Airia Clio Agent"""
     try:
         # Prepare the data for Airia
@@ -79,6 +80,16 @@ def call_airia_agent(user_input, airia_api_key, airia_user_id, clio_data=None):
             clio_context = "\n".join(context_lines)
             prompt = f"User Question: {user_input}\n\nClio Matter Data:\n{clio_context}"
         
+        # Prepare request data - try different formats
+        request_data = {
+            "userInput": prompt,
+            "asyncOutput": False
+        }
+        
+        # Add userID if provided
+        if airia_user_id:
+            request_data["userID"] = airia_user_id
+        
         # Call Airia API
         response = requests.post(
             AIRIA_API_URL,
@@ -86,18 +97,19 @@ def call_airia_agent(user_input, airia_api_key, airia_user_id, clio_data=None):
                 "X-API-KEY": airia_api_key,
                 "Content-Type": "application/json"
             },
-            json={
-                "userID": airia_user_id,
-                "userInput": prompt,
-                "asyncOutput": False
-            }
+            json=request_data
         )
+        
+        # Show debug info
+        st.info(f"Airia API Status: {response.status_code}")
         
         response.raise_for_status()
         return response.json()
         
     except requests.exceptions.RequestException as e:
         st.error(f"Failed to call Airia agent: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"Response text: {e.response.text}")
         return None
 
 # === STREAMLIT UI ===
@@ -108,7 +120,7 @@ st.title("⚖️ Clio + Airia Legal Assistant")
 clio_client_id, clio_client_secret, clio_refresh_token, claude_api_key, airia_api_key, airia_user_id = get_secrets()
 
 # Check if we have all required secrets
-if not all([clio_client_id, clio_client_secret, clio_refresh_token, airia_api_key, airia_user_id]):
+if not all([clio_client_id, clio_client_secret, clio_refresh_token, airia_api_key]):
     st.error("Missing required secrets. Please configure:")
     st.code("""
 [clio]
@@ -121,7 +133,7 @@ api_key = "your_claude_api_key"
 
 [airia]
 api_key = "your_airia_api_key"
-user_id = "your_airia_user_id"
+# user_id = "optional_if_embedded_in_api_key"
     """)
     st.stop()
 
