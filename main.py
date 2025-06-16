@@ -1,48 +1,49 @@
 import streamlit as st
 import requests
 
-# --- CONFIGURATION ---
-AIRIA_ENDPOINT = "https://app.airia.ai/api/agents/28330c27-c35a-4d5f-9797-e59382f5d140/invoke"
-BEARER_TOKEN = "11148-UFTY4rycrtPlZnkYPUT3dRwyUEFPam57A7"  # Your latest token
+# === CONFIGURATION ===
+API_URL = "https://api.airia.ai/v2/PipelineExecution/28330c27-c35a-4d5f-9797-e59382f5d140"
+API_KEY = "ak-MzQ0MDQ3Nzc4MnwxNzUwMTE1NTUxNzQ0fENhcmF2ZWwgTGF3LXwxfDI4NDEzNjAxMDQg"
 
-# --- Streamlit App UI ---
-st.set_page_config(page_title="Clio Agent Chat", layout="centered")
-st.title("🤖 Clio Matter Status Agent")
-st.write("Ask a question about your Clio matters (e.g., 'What matters are open today?')")
+# Optional: set user_id manually if known, otherwise fetch once from successful response
+USER_ID = None  # or paste a known ID like "123e4567-e89b-12d3-a456-426614174000"
 
-# Chat history
-if "history" not in st.session_state:
-    st.session_state.history = []
+st.set_page_config(page_title="Clio Matters Overview", layout="centered")
+st.title("🔍 Clio Matter Status Agent")
 
-# Input box
-user_input = st.text_input("Your question", placeholder="Type here and press enter...")
+query = st.text_input("Ask about your matters (e.g., 'What matters are open today?')")
 
-if user_input:
-    # Show loading while processing
-    with st.spinner("Getting response..."):
+if st.button("Run Agent"):
+    if not query:
+        st.warning("Please enter a question.")
+    else:
+        headers = {
+            "X-API-KEY": API_KEY,
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "userInput": query,
+            "asyncOutput": False
+        }
+
+        # Include userId if known
+        if USER_ID:
+            payload["userId"] = USER_ID
+
         try:
-            headers = {
-                "Authorization": f"Bearer {BEARER_TOKEN}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "input": user_input
-            }
+            response = requests.post(API_URL, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
 
-            res = requests.post(AIRIA_ENDPOINT, headers=headers, json=payload)
-            res.raise_for_status()
+            # On first run, extract and save userId if needed
+            if not USER_ID and "userId" in data:
+                USER_ID = data["userId"]
+                st.success(f"Retrieved and cached user ID: `{USER_ID}`")
 
-            data = res.json()
-            answer = data.get("output", "No response received.")
+            st.subheader("🔎 Agent Response")
+            st.markdown(data.get("output", "No output found."))
 
-            # Store history
-            st.session_state.history.append((user_input, answer))
+        except requests.exceptions.RequestException as e:
+            st.error(f"Error: {e}")
 
-        except Exception as e:
-            st.error(f"Something went wrong: {e}")
-
-# Display chat
-for question, answer in reversed(st.session_state.history):
-    st.markdown(f"**You:** {question}")
-    st.markdown(f"**Clio Agent:** {answer}")
-    st.markdown("---")
