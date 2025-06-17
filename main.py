@@ -32,7 +32,7 @@ api_key = st.text_input(
 user_id = st.text_input(
     "User ID",
     value="aavadhani@briedlylegal.com",
-    help="Your Airia user ID"
+    help="Your Airia user ID (this should be your email)"
 )
 
 # User input
@@ -59,7 +59,7 @@ if st.button("Send to Clio Agent", type="primary"):
                 url = "https://api.airia.ai/v2/PipelineExecution/28330c27-c35a-4d5f-9797-e59382f5d140"
                 
                 payload = {
-                    "userId": user_id,
+                    "userID": user_id,  # Note: capital ID
                     "userInput": user_input,
                     "asyncOutput": False
                 }
@@ -70,6 +70,10 @@ if st.button("Send to Clio Agent", type="primary"):
                 }
                 
                 # Make the API call
+                st.write("**Debug Info:**")
+                st.write(f"User ID being sent: `{user_id}`")
+                st.write(f"Payload: `{payload}`")
+                
                 response = requests.post(url, headers=headers, json=payload)
                 
                 # Display results
