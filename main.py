@@ -29,11 +29,28 @@ api_key = st.text_input(
 )
 
 # User ID input
-user_id = st.text_input(
-    "User ID",
-    value="aavadhani@briedlylegal.com",
-    help="Your Airia user ID (this should be your email)"
+user_id_option = st.selectbox(
+    "User ID Option",
+    ["Custom GUID", "Try default user", "Try email format", "Generate test GUID"],
+    help="Select how to handle the user ID"
 )
+
+if user_id_option == "Custom GUID":
+    user_id = st.text_input(
+        "User ID (GUID format)",
+        value="",
+        placeholder="Enter your user GUID (e.g., 12345678-1234-1234-1234-123456789abc)"
+    )
+elif user_id_option == "Try default user":
+    user_id = "00000000-0000-0000-0000-000000000000"
+    st.write(f"Using default user ID: `{user_id}`")
+elif user_id_option == "Try email format":
+    user_id = "aavadhani@brieflylegal.com"
+    st.write(f"Trying email format: `{user_id}`")
+else:  # Generate test GUID
+    import uuid
+    user_id = str(uuid.uuid4())
+    st.write(f"Generated test GUID: `{user_id}`")
 
 # User input
 st.subheader("Ask Clio")
