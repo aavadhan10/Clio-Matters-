@@ -58,11 +58,12 @@ if st.button("Send to Clio Agent", type="primary"):
                 # Prepare the API call
                 url = "https://api.airia.ai/v2/PipelineExecution/28330c27-c35a-4d5f-9797-e59382f5d140"
                 
-                payload = {
-                    "userID": user_id,  # Note: capital ID
+                # Try the exact format from your original screenshot
+                payload = json.dumps({
+                    "userId": user_id,
                     "userInput": user_input,
                     "asyncOutput": False
-                }
+                })
                 
                 headers = {
                     "X-API-KEY": api_key,
@@ -72,9 +73,9 @@ if st.button("Send to Clio Agent", type="primary"):
                 # Make the API call
                 st.write("**Debug Info:**")
                 st.write(f"User ID being sent: `{user_id}`")
-                st.write(f"Payload: `{payload}`")
+                st.write(f"Payload string: `{payload}`")
                 
-                response = requests.post(url, headers=headers, json=payload)
+                response = requests.post(url, headers=headers, data=payload)
                 
                 # Display results
                 if response.status_code == 200:
